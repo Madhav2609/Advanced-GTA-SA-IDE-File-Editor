@@ -2,11 +2,12 @@ import subprocess
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, scrolledtext
+import re
 
 class IDEFileEditor:
     def __init__(self, root):
         self.root = root
-        self.root.title("Advanced GTA SA IDE File Editor")
+        self.root.title("Advanced GTA SA IDE File Editor by Madhav2609")
         self.root.geometry("1000x600")
 
         # Variables
@@ -52,9 +53,21 @@ class IDEFileEditor:
         self.clear_button = ttk.Button(self.search_frame, text="Clear", command=self.clear_search)
         self.clear_button.pack(side="left", padx=5)
 
-        # Text Editor
-        self.text_editor = scrolledtext.ScrolledText(self.root, wrap="word", undo=True, font=("Consolas", 12), bg="#1E1E1E", fg="white", insertbackground="white")
+        # Text Editor with syntax highlighting configuration
+        self.text_editor = scrolledtext.ScrolledText(self.root, wrap="word", undo=True, 
+            font=("Consolas", 12), bg="#1E1E1E", fg="white", insertbackground="white")
         self.text_editor.pack(expand=True, fill="both", padx=10, pady=10)
+
+        # Configure syntax highlighting tags
+        self.text_editor.tag_configure("section", foreground="#00FF00")      # Section headers
+        self.text_editor.tag_configure("id", foreground="#FFA500")          # ID numbers
+        self.text_editor.tag_configure("modelname", foreground="#ADD8E6")   # Model names
+        self.text_editor.tag_configure("coordinate", foreground="#FF69B4")   # Coordinates
+        self.text_editor.tag_configure("comment", foreground="#808080")     # Comments
+        self.text_editor.tag_configure("keyword", foreground="#FF00FF")     # Special keywords
+        
+        # Bind syntax highlighting to text changes
+        self.text_editor.bind("<KeyRelease>", self.highlight_syntax)
 
         # Menu
         menu_bar = tk.Menu(self.root)
@@ -71,6 +84,8 @@ class IDEFileEditor:
         tools_menu.add_command(label="Generate Unused IDs & Description of IDEs", command=self.generate_unused_ids)
         tools_menu.add_command(label="IDE Renumberer", command=self.launch_IDE_Renumber_tool)
         tools_menu.add_command(label="IPL LOD SEPARATOR", command=self.launch_IPL_LOD_Separator_Tool)
+        tools_menu.add_command(label="Generate Duplicated IDs of IDEs", command=self.generate_duplicate_ids)
+
         menu_bar.add_cascade(label="Tools", menu=tools_menu)
         # Status Bar
         self.status_bar = ttk.Label(self.root, text="No file loaded", anchor="w")
@@ -181,6 +196,47 @@ class IDEFileEditor:
 
         return f"File: {file_name}\nDescription: {description}\nID Range: {min_id} - {max_id}\nTotal Entries: {total_entries}\n{'-'*40}\n"
 
+
+    def generate_duplicate_ids(self):
+            if not self.current_directory:
+                messagebox.showwarning("No Directory Selected", "Please open an IDE directory first.")
+                return
+
+            output_path = os.path.join(self.current_directory, "duplicated_objects.txt")
+            id_dict = {}
+            duplicates = []
+
+            # Keywords to ignore
+            ignore_keywords = {"objs", "end", "tobj", "path", "2dfx", "anim", "txdp"}
+
+            # Extract duplicate IDs from opened IDE files
+            for ide_file in self.ide_files:
+                if ide_file.endswith(".ide") and os.path.exists(ide_file):
+                    with open(ide_file, 'r', encoding="utf-8") as file:
+                        for line in file:
+                            line = line.strip()
+                            # Ignore empty lines, commented lines, or lines starting with a word
+                            if not line or line.startswith("#") or (line.split(',')[0].strip() and not line.split(',')[0].strip().isdigit()):
+                                continue
+                            
+                            # Extract the first element (ID number)
+                            id_number = line.split(',')[0].strip()
+                            if id_number.isdigit() and id_number not in ignore_keywords:
+                                if id_number in id_dict:
+                                    duplicates.append(f"{id_number} ID Number is being used by the files {os.path.basename(ide_file)} and {os.path.basename(id_dict[id_number])}")
+                                else:
+                                    id_dict[id_number] = ide_file
+
+            # Write duplicate IDs to the output file
+            with open(output_path, "w", encoding="utf-8") as output_file:
+                if duplicates:
+                    output_file.write("\n".join(duplicates) + "\n")
+                else:
+                    output_file.write("No duplicate IDs found.\n")
+
+            messagebox.showinfo("Success", f"Duplicate IDs saved to {output_path}")
+
+
     def find_unused_ids(self, used_ids, id_range=90000):
         all_ids = set(range(id_range + 1))
         unused_ids = sorted(all_ids - used_ids)
@@ -232,6 +288,7 @@ class IDEFileEditor:
                         print(f"Error reading {file_path}: {e}")
 
         self.status_bar.config(text=f"Loaded {len(self.ide_files)} IDE files")
+        self.highlight_syntax()
 
     def navigate_to_file(self, event):
         try:
@@ -260,7 +317,7 @@ class IDEFileEditor:
                 start_marker = f"// --- {file_basename} --- //\n"
 
                 start_index = full_text.find(start_marker)
-                if start_index == -1:
+                if (start_index == -1):
                     continue
 
                 start_index += len(start_marker)
@@ -275,6 +332,52 @@ class IDEFileEditor:
             self.status_bar.config(text="Changes saved successfully")
         except Exception as e:
             messagebox.showerror("Error", f"Error saving changes: {e}")
+
+    def highlight_syntax(self, event=None):
+        # Clear existing tags
+        for tag in ["section", "id", "modelname", "coordinate", "comment", "keyword"]:
+            self.text_editor.tag_remove(tag, "1.0", "end")
+        
+        # Get all text content
+        content = self.text_editor.get("1.0", "end")
+        
+        # Process line by line
+        for line_num, line in enumerate(content.split('\n'), 1):
+            # Skip empty lines
+            if not line.strip():
+                continue
+                
+            # Highlight comments
+            if '#' in line:
+                comment_start = line.index('#')
+                start_index = f"{line_num}.{comment_start}"
+                self.text_editor.tag_add("comment", start_index, f"{line_num}.end")
+                continue
+            
+            # Highlight section headers
+            if line.strip().lower() in {"objs", "tobj", "anim", "inst", "path", "2dfx", "txdp", "end"}:
+                self.text_editor.tag_add("section", f"{line_num}.0", f"{line_num}.end")
+                continue
+            
+            # Process data lines
+            parts = line.strip().split(',')
+            if len(parts) > 1:
+                # Highlight ID (first number)
+                if parts[0].strip().isdigit():
+                    self.text_editor.tag_add("id", f"{line_num}.0", f"{line_num}.{len(parts[0])}")
+                
+                # Highlight model name (second part)
+                if len(parts) > 1:
+                    start_pos = len(parts[0]) + 1
+                    end_pos = start_pos + len(parts[1])
+                    self.text_editor.tag_add("modelname", f"{line_num}.{start_pos}", f"{line_num}.{end_pos}")
+                
+                # Highlight coordinates (floating point numbers)
+                for i, part in enumerate(parts[2:], 2):
+                    if re.match(r'-?\d*\.?\d+', part.strip()):
+                        start_pos = sum(len(p) + 1 for p in parts[:i])
+                        end_pos = start_pos + len(part)
+                        self.text_editor.tag_add("coordinate", f"{line_num}.{start_pos}", f"{line_num}.{end_pos}")
 
 if __name__ == "__main__":
     root = tk.Tk()
