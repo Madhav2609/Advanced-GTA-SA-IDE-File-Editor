@@ -82,10 +82,11 @@ class IDEFileEditor:
 
         tools_menu = tk.Menu(menu_bar, tearoff=0)
         tools_menu.add_command(label="Generate Unused IDs & Description of IDEs", command=self.generate_unused_ids)
-        tools_menu.add_command(label="IDE Renumberer", command=self.launch_IDE_Renumber_tool)
-        tools_menu.add_command(label="IPL LOD SEPARATOR", command=self.launch_IPL_LOD_Separator_Tool)
         tools_menu.add_command(label="Generate Duplicated IDs of IDEs", command=self.generate_duplicate_ids)
-
+        tools_menu.add_command(label="IDE Renumbering", command=self.launch_IDE_Renumber_tool)
+        tools_menu.add_command(label="IPL Lod Separator", command=self.launch_IPL_LOD_Separator_Tool)
+        tools_menu.add_command(label="IPL ID Sorting", command=self.launch_IPL_ID_Sorting_Tool)
+        
         menu_bar.add_cascade(label="Tools", menu=tools_menu)
         # Status Bar
         self.status_bar = ttk.Label(self.root, text="No file loaded", anchor="w")
@@ -127,6 +128,15 @@ class IDEFileEditor:
         self.text_editor.tag_remove("search_highlight", "1.0", tk.END)
         self.search_results = []
         self.current_search_index = -1
+    
+    def launch_IPL_ID_Sorting_Tool(self):
+        tool_path = os.path.join(os.path.dirname(__file__), "IPL ID Sorting Script.py")
+        if os.path.exists(tool_path):
+           subprocess.Popen(["python", tool_path], shell=True)
+        else:
+           messagebox.showerror("Error", "Tool script not found!")
+
+
 
     def launch_IDE_Renumber_tool(self):
         tool_path = os.path.join(os.path.dirname(__file__), "IDE renumber.py")
@@ -198,44 +208,93 @@ class IDEFileEditor:
 
 
     def generate_duplicate_ids(self):
-            if not self.current_directory:
-                messagebox.showwarning("No Directory Selected", "Please open an IDE directory first.")
-                return
+        if not self.current_directory:
+            messagebox.showwarning("No Directory Selected", "Please open an IDE directory first.")
+            return
 
-            output_path = os.path.join(self.current_directory, "duplicated_objects.txt")
-            id_dict = {}
-            duplicates = []
+        output_path = os.path.join(self.current_directory, "duplicated_objects.txt")
+        id_dict = {}  # Format: {id_number: [(ide_file, model_name), ...]}
+        model_dict = {}  # Format: {model_name_lower: [(ide_file, original_model_name), ...]}
+        id_duplicates = []
+        model_duplicates = []
 
-            # Keywords to ignore
-            ignore_keywords = {"objs", "end", "tobj", "path", "2dfx", "anim", "txdp"}
+        # Keywords to ignore
+        ignore_keywords = {"objs", "end", "tobj", "path", "2dfx", "anim", "txdp"}
 
-            # Extract duplicate IDs from opened IDE files
-            for ide_file in self.ide_files:
-                if ide_file.endswith(".ide") and os.path.exists(ide_file):
+        # First pass: collect all IDs and model names
+        for ide_file in self.ide_files:
+            if ide_file.endswith(".ide") and os.path.exists(ide_file):
+                try:
                     with open(ide_file, 'r', encoding="utf-8") as file:
+                        current_section = None
                         for line in file:
                             line = line.strip()
-                            # Ignore empty lines, commented lines, or lines starting with a word
-                            if not line or line.startswith("#") or (line.split(',')[0].strip() and not line.split(',')[0].strip().isdigit()):
-                                continue
                             
-                            # Extract the first element (ID number)
-                            id_number = line.split(',')[0].strip()
+                            if not line or line.startswith("#"):
+                                continue
+                                
+                            if line.lower() in ignore_keywords:
+                                current_section = line.lower()
+                                continue
+                                
+                            if not current_section or current_section in {"end", "path", "2dfx", "anim", "txdp"}:
+                                continue
+
+                            parts = [part.strip() for part in line.split(',')]
+                            if len(parts) < 2:
+                                continue
+
+                            id_number = parts[0]
+                            model_name = parts[1]
+
+                            # Store ID occurrences
                             if id_number.isdigit() and id_number not in ignore_keywords:
-                                if id_number in id_dict:
-                                    duplicates.append(f"{id_number} ID Number is being used by the files {os.path.basename(ide_file)} and {os.path.basename(id_dict[id_number])}")
-                                else:
-                                    id_dict[id_number] = ide_file
+                                if id_number not in id_dict:
+                                    id_dict[id_number] = []
+                                id_dict[id_number].append((ide_file, model_name))
 
-            # Write duplicate IDs to the output file
-            with open(output_path, "w", encoding="utf-8") as output_file:
-                if duplicates:
-                    output_file.write("\n".join(duplicates) + "\n")
-                else:
-                    output_file.write("No duplicate IDs found.\n")
+                            # Store model name occurrences (case-insensitive)
+                            if model_name and model_name.lower() not in {k.lower() for k in ignore_keywords}:
+                                model_name_lower = model_name.lower()
+                                if model_name_lower not in model_dict:
+                                    model_dict[model_name_lower] = []
+                                model_dict[model_name_lower].append((ide_file, model_name))
 
-            messagebox.showinfo("Success", f"Duplicate IDs saved to {output_path}")
+                except Exception as e:
+                    print(f"Error processing {ide_file}: {e}")
 
+        # Second pass: identify duplicates
+        for id_number, occurrences in id_dict.items():
+            if len(occurrences) > 1:
+                files = [os.path.basename(file) for file, _ in occurrences]
+                duplicate_entry = f"ID {id_number} is used by files: {' and '.join(files)}"
+                id_duplicates.append(duplicate_entry)
+
+        for model_name_lower, occurrences in model_dict.items():
+            if len(occurrences) > 1:
+                # Filter out duplicates from the same file
+                unique_files = {os.path.basename(file) for file, _ in occurrences}
+                if len(unique_files) > 1:
+                    files = [os.path.basename(file) for file, _ in occurrences]
+                    model_name = occurrences[0][1]  # Use the first occurrence's original model name
+                    duplicate_entry = f"Model {model_name} is used by files: {' and '.join(sorted(set(files)))}"
+                    model_duplicates.append(duplicate_entry)
+
+        # Write results to file
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write("=== Duplicate IDs ===\n")
+            if id_duplicates:
+                output_file.write("\n".join(sorted(id_duplicates)) + "\n")
+            else:
+                output_file.write("No duplicate IDs found.\n")
+
+            output_file.write("\n=== Duplicate Model Names ===\n")
+            if model_duplicates:
+                output_file.write("\n".join(sorted(model_duplicates)) + "\n")
+            else:
+                output_file.write("No duplicate model names found.\n")
+
+        messagebox.showinfo("Success", f"Duplicate IDs and model names saved to {output_path}")
 
     def find_unused_ids(self, used_ids, id_range=90000):
         all_ids = set(range(id_range + 1))
