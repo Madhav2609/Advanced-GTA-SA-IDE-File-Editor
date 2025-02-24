@@ -1,17 +1,4 @@
-# IPL ID Sorting Script v1.0 r2
-#
-# A simple script to sort IPL id's
-#
-# What does this script do?
-#
-# This script sorts the id's of yout ipl file according to your ide files.
-#
-# Put your .ide and ipl files in the same dir as the program.Multiple file processing is also supported.
-#
-# Contact: user.grinch@gmail.com
-#
-# Script tested using Python 3.7.1 32-bit
-# Last Updated on : 20/12/2018 
+# took inspiration from grinch's script
 
 import glob, os
 import tkinter as tk
