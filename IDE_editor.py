@@ -73,8 +73,10 @@ class IDEFileEditor:
         menu_bar = tk.Menu(self.root)
         self.root.config(menu=menu_bar)
         file_menu = tk.Menu(menu_bar, tearoff=0)
-        file_menu.add_command(label="Open IDE Files", command=self.open_and_edit_files)
+        file_menu.add_command(label="Open IDE Files (Scans Folders)", command=self.open_and_edit_files)
+        file_menu.add_command(label="Open IDE Files (Multiple)", command=self.open_multiple_files)
         file_menu.add_command(label="Save Changes", command=self.save_edits)
+        file_menu.add_command(label="Save Selected File", command=self.save_selected_file)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menu_bar.add_cascade(label="File", menu=file_menu)
@@ -330,24 +332,44 @@ class IDEFileEditor:
                 if file.lower().endswith(".ide"):
                     file_path = os.path.join(dirpath, file)
                     self.ide_files.append(file_path)
-
-                    try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                            file_content = f.read()
-                            self.original_contents[file_path] = file_content
-
-                            start_index = self.text_editor.index(tk.END)
-                            self.text_editor.insert(tk.END, f"// --- {os.path.basename(file_path)} --- //\n", "file_header")
-                            self.text_editor.insert(tk.END, file_content + "\n\n")
-                            end_index = self.text_editor.index(tk.END)
-
-                            self.file_sections[file_path] = (start_index, end_index)
-                            self.file_list.insert(tk.END, os.path.basename(file_path))
-                    except Exception as e:
-                        print(f"Error reading {file_path}: {e}")
+                    self.load_file_into_editor(file_path)
 
         self.status_bar.config(text=f"Loaded {len(self.ide_files)} IDE files")
         self.highlight_syntax()
+
+    def open_multiple_files(self):
+        file_paths = filedialog.askopenfilenames(title="Select IDE Files", filetypes=[("IDE Files", "*.ide")])
+        if not file_paths:
+            return
+
+        self.ide_files = []
+        self.file_sections.clear()
+        self.original_contents.clear()
+        self.file_list.delete(0, tk.END)
+        self.text_editor.delete("1.0", tk.END)
+
+        for file_path in file_paths:
+            self.ide_files.append(file_path)
+            self.load_file_into_editor(file_path)
+
+        self.status_bar.config(text=f"Loaded {len(self.ide_files)} IDE files")
+        self.highlight_syntax()
+
+    def load_file_into_editor(self, file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                file_content = f.read()
+                self.original_contents[file_path] = file_content
+
+                start_index = self.text_editor.index(tk.END)
+                self.text_editor.insert(tk.END, f"// --- {os.path.basename(file_path)} --- //\n", "file_header")
+                self.text_editor.insert(tk.END, file_content + "\n\n")
+                end_index = self.text_editor.index(tk.END)
+
+                self.file_sections[file_path] = (start_index, end_index)
+                self.file_list.insert(tk.END, os.path.basename(file_path))
+        except Exception as e:
+            print(f"Error reading {file_path}: {e}")
 
     def navigate_to_file(self, event):
         try:
@@ -391,6 +413,34 @@ class IDEFileEditor:
             self.status_bar.config(text="Changes saved successfully")
         except Exception as e:
             messagebox.showerror("Error", f"Error saving changes: {e}")
+
+    def save_selected_file(self):
+        try:
+            selected_file = self.file_list.get(self.file_list.curselection())
+            for path, (start, end) in self.file_sections.items():
+                if os.path.basename(path) == selected_file:
+                    full_text = self.text_editor.get("1.0", tk.END)
+                    start_marker = f"// --- {selected_file} --- //\n"
+
+                    start_index = full_text.find(start_marker)
+                    if (start_index == -1):
+                        messagebox.showerror("Error", "Could not find selected file in editor.")
+                        return
+
+                    start_index += len(start_marker)
+                    next_section_index = full_text.find("// ---", start_index)
+
+                    new_content = full_text[start_index:next_section_index].strip() if next_section_index != -1 else full_text[start_index:].strip()
+
+                    with open(path, "w", encoding="utf-8", errors="ignore") as file:
+                        file.write(new_content)
+
+                    messagebox.showinfo("Success", f"{selected_file} saved successfully!")
+                    self.status_bar.config(text=f"{selected_file} saved successfully")
+                    return
+            messagebox.showerror("Error", "Could not find selected file.")
+        except Exception:
+            messagebox.showerror("Error", "No file selected.")
 
     def highlight_syntax(self, event=None):
         # Clear existing tags
