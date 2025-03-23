@@ -234,33 +234,36 @@ class IDEFileEditor:
                             
                             if not line or line.startswith("#"):
                                 continue
-                                
-                            if line.lower() in ignore_keywords:
-                                current_section = line.lower()
+                            
+                            # Update section tracking    
+                            lower_line = line.lower()
+                            if lower_line in {"objs", "tobj", "weap", "peds", "cars", "hier", "end", "path", "2dfx", "anim", "txdp"}:
+                                current_section = lower_line
                                 continue
-                                
+                            
+                            # Skip processing for non-data sections
                             if not current_section or current_section in {"end", "path", "2dfx", "anim", "txdp"}:
                                 continue
 
                             parts = [part.strip() for part in line.split(',')]
-                            if len(parts) < 2:
-                                continue
-
-                            id_number = parts[0]
-                            model_name = parts[1]
-
-                            # Store ID occurrences
-                            if id_number.isdigit() and id_number not in ignore_keywords:
+                            
+                            # Get ID and model name regardless of section type
+                            # Just check if we have at least 2 parts and first is a number
+                            if len(parts) >= 2 and parts[0].strip().isdigit():
+                                id_number = parts[0].strip()
+                                model_name = parts[1].strip()
+                                
+                                # Store the section type with the data for better reporting
                                 if id_number not in id_dict:
                                     id_dict[id_number] = []
-                                id_dict[id_number].append((ide_file, model_name))
+                                id_dict[id_number].append((ide_file, model_name, current_section))
 
-                            # Store model name occurrences (case-insensitive)
-                            if model_name and model_name.lower() not in {k.lower() for k in ignore_keywords}:
-                                model_name_lower = model_name.lower()
-                                if model_name_lower not in model_dict:
-                                    model_dict[model_name_lower] = []
-                                model_dict[model_name_lower].append((ide_file, model_name))
+                                # Store model name occurrences (case-insensitive)
+                                if model_name:
+                                    model_name_lower = model_name.lower()
+                                    if model_name_lower not in model_dict:
+                                        model_dict[model_name_lower] = []
+                                    model_dict[model_name_lower].append((ide_file, model_name, current_section))
 
                 except Exception as e:
                     print(f"Error processing {ide_file}: {e}")
@@ -268,18 +271,18 @@ class IDEFileEditor:
         # Second pass: identify duplicates
         for id_number, occurrences in id_dict.items():
             if len(occurrences) > 1:
-                files = [os.path.basename(file) for file, _ in occurrences]
-                duplicate_entry = f"ID {id_number} is used by files: {' and '.join(files)}"
+                files_info = [f"{os.path.basename(file)} ({section})" for file, _, section in occurrences]
+                duplicate_entry = f"ID {id_number} is used by: {' and '.join(files_info)}"
                 id_duplicates.append(duplicate_entry)
 
         for model_name_lower, occurrences in model_dict.items():
             if len(occurrences) > 1:
                 # Filter out duplicates from the same file
-                unique_files = {os.path.basename(file) for file, _ in occurrences}
+                unique_files = {(os.path.basename(file), section) for file, _, section in occurrences}
                 if len(unique_files) > 1:
-                    files = [os.path.basename(file) for file, _ in occurrences]
+                    files_info = [f"{file} ({section})" for file, section in unique_files]
                     model_name = occurrences[0][1]  # Use the first occurrence's original model name
-                    duplicate_entry = f"Model {model_name} is used by files: {' and '.join(sorted(set(files)))}"
+                    duplicate_entry = f"Model {model_name} is used by: {' and '.join(sorted(files_info))}"
                     model_duplicates.append(duplicate_entry)
 
         # Write results to file
